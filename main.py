@@ -4,13 +4,17 @@ import shutil
 import glob
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTreeWidget, QTreeWidgetItem, QTabWidget,
-    QTextEdit, QToolBar, QAction, QFileDialog, QWidget, QHBoxLayout, QVBoxLayout,
-    QStatusBar, QTabBar, QPushButton, QComboBox, QLabel, QScrollArea
+    QTextEdit, QToolBar, QAction, QFileDialog, QWidget, QHBoxLayout, QVBoxLayout,QTableWidgetItem,
+    QStatusBar, QTabBar, QPushButton, QComboBox, QLabel, QScrollArea,QSplitter,QTableWidget
 )
+import piexif
+from PIL import Image
 from PyQt5.QtGui import QIcon, QFont, QPixmap
 from PyQt5.QtCore import Qt, QSize
 from ppadb.client import Client as AdbClient
 import qdarkstyle
+from datetime import datetime
+
 class FixedWidthTabBar(QTabBar):
     def tabSizeHint(self, index):
         return QSize(200, self.sizeHint().height())
@@ -98,9 +102,10 @@ class DroidForen(QMainWindow):
         self.setCentralWidget(central_widget)
         self.populate_list()
 
-    def closeEvent(self, event):
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-        event.accept()
+    # def closeEvent(self, event):
+    #     shutil.rmtree(self.temp_dir, ignore_errors=True)
+    #     event.accept()
+
     def populate_list(self):
         try:
             client = AdbClient(host="127.0.0.1", port=5037)
@@ -245,8 +250,7 @@ class DroidForen(QMainWindow):
                 self.previewTabs.setCurrentIndex(i)
                 return
         if title == "Call Logs":
-            content = self.device.shell("content query --uri content://call_log/calls")
-            self.open_tab(title, content)
+            self.show_call_logs()
         elif title == "SMS":
             content = self.device.shell("content query --uri content://sms/")
             self.open_tab(title, content)
@@ -264,23 +268,78 @@ class DroidForen(QMainWindow):
                 self.previewTabs.setCurrentIndex(i)
                 return
 
-        label = QLabel()
-        label.setAlignment(Qt.AlignCenter)
-
         pixmap = QPixmap(img_path)
-        label.setPixmap(pixmap.scaled(800, 600, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        image_label = QLabel()
+        image_label.setAlignment(Qt.AlignCenter)
+        image_label.setPixmap(pixmap.scaled(600, 600, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.addWidget(label, alignment=Qt.AlignCenter)
+        exif_data = self.img_exif(img_path)
+        exif_label = QLabel()
+        exif_label.setAlignment(Qt.AlignTop)
+        exif_label.setWordWrap(True)
+        exif_text = "\n".join(f"{key}: {value}" for key, value in exif_data.items())
+        exif_label.setText(exif_text)
+
+        image_container = QWidget()
+        image_layout = QVBoxLayout(image_container)
+        image_layout.addWidget(image_label, alignment=Qt.AlignCenter)
+
+        exif_container = QWidget()
+        exif_layout = QVBoxLayout(exif_container)
+        exif_layout.addWidget(QLabel("EXIF Metadata:"))
+        exif_layout.addWidget(exif_label)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(image_container)
+        splitter.addWidget(exif_container)
+        splitter.setSizes([700, 400])
 
         scroll = QScrollArea()
-        scroll.setWidget(container)
+        scroll.setWidget(splitter)
         scroll.setWidgetResizable(True)
 
         index = self.previewTabs.addTab(scroll, title)
         self.previewTabs.setCurrentIndex(index)
 
+    def show_call_logs(self):
+        try:
+            raw = self.device.shell("content query --uri content://call_log/calls")
+            entries = [e.strip() for e in raw.split("Row") if e.strip()]
+            headers = ["Name", "Number", "Type", "Date", "Duration"]
+
+            table = QTableWidget()
+            table.setColumnCount(len(headers))
+            table.setHorizontalHeaderLabels(headers)
+            table.setRowCount(len(entries))
+
+            for row_idx, entry in enumerate(entries):
+                entry_dict = dict()
+                for part in entry.split(","):
+                    if "=" in part:
+                        key, val = part.strip().split("=", 1)
+                        val = val.strip()
+                        if val in ("NULL", ""):
+                            val = "N/A"
+                        entry_dict[key.strip()] = val
+
+                name = entry_dict.get("name", "N/A")
+                number = entry_dict.get("number", "N/A")
+                call_type = self.get_call_type(entry_dict.get("type", "0"))
+                date = self.format_date(entry_dict.get("date", "0"))
+                duration = f"{entry_dict.get('duration', '0')} sec"
+
+                table.setItem(row_idx, 0, QTableWidgetItem(name))
+                table.setItem(row_idx, 1, QTableWidgetItem(number))
+                table.setItem(row_idx, 2, QTableWidgetItem(call_type))
+                table.setItem(row_idx, 3, QTableWidgetItem(date))
+                table.setItem(row_idx, 4, QTableWidgetItem(duration))
+
+            table.resizeColumnsToContents()
+            index = self.previewTabs.addTab(table, "Call Logs")
+            self.previewTabs.setCurrentIndex(index)
+
+        except Exception as e:
+            self.open_tab("Call Logs", f"Failed to load call logs: {e}")
     def open_tab(self, title, content):
         for i in range(self.previewTabs.count()):
             if self.previewTabs.tabText(i) == title:
@@ -291,6 +350,25 @@ class DroidForen(QMainWindow):
         editor.setReadOnly(True)
         index = self.previewTabs.addTab(editor, title)
         self.previewTabs.setCurrentIndex(index)
+    def get_call_type(self, call_type):
+        mapping = {
+            "1": "Incoming",
+            "2": "Outgoing",
+            "3": "Missed",
+            "4": "Voicemail",
+            "5": "Rejected",
+            "6": "Blocked",
+            "7": "Answered Externally"
+        }
+        return mapping.get(call_type, "Unknown")
+
+
+    def format_date(self, timestamp):
+        try:
+            ts = int(timestamp)
+            return datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
+        except:
+            return "Invalid"
 
     def open_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Open File")
@@ -301,7 +379,31 @@ class DroidForen(QMainWindow):
                 self.open_tab(os.path.basename(file_path), content)
             except Exception as e:
                 self.open_tab("Error", f"Could not open file: {e}")
+    def img_exif(self, image_path):
+        try:
+            image = Image.open(image_path)
+            exif_bytes = image.info.get("exif", None)
+            if not exif_bytes:
+                return {"EXIF": "No EXIF data found."}
 
+            exif_data = piexif.load(exif_bytes)
+            exif_dict = dict()
+            exif_dict["Make"] = exif_data["0th"].get(piexif.ImageIFD.Make, b"").decode(errors="ignore")
+            exif_dict["Model"] = exif_data["0th"].get(piexif.ImageIFD.Model, b"").decode(errors="ignore")
+            exif_dict["Software"] = exif_data["0th"].get(piexif.ImageIFD.Software, b"").decode(errors="ignore")
+            exif_dict["DateTime"] = exif_data["0th"].get(piexif.ImageIFD.DateTime, b"").decode(errors="ignore")
+            exif_dict["Orientation"] = exif_data["0th"].get(piexif.ImageIFD.Orientation, "N/A")
+            exif_dict["ExposureTime"] = exif_data["Exif"].get(piexif.ExifIFD.ExposureTime, "N/A")
+            exif_dict["FNumber"] = exif_data["Exif"].get(piexif.ExifIFD.FNumber, "N/A")
+            exif_dict["ISOSpeedRatings"] = exif_data["Exif"].get(piexif.ExifIFD.ISOSpeedRatings, "N/A")
+            exif_dict["DateTimeOriginal"] = exif_data["Exif"].get(piexif.ExifIFD.DateTimeOriginal, b"").decode(errors="ignore")
+
+            gps_data = exif_data.get("GPS", {})
+            exif_dict["GPS"] = gps_data if gps_data else "Not Available"
+
+            return exif_dict
+        except Exception as e:
+            return {"Error": str(e)}
     def export_data(self):
         current_tab = self.previewTabs.tabText(self.previewTabs.currentIndex())
         folder = QFileDialog.getExistingDirectory(self, "Select export folder")
