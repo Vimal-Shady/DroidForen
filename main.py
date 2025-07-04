@@ -5,18 +5,17 @@ import glob
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTreeWidget, QTreeWidgetItem, QTabWidget,
     QTextEdit, QToolBar, QAction, QFileDialog, QWidget, QHBoxLayout, QVBoxLayout,
-    QStatusBar, QTabBar, QPushButton, QComboBox, QLabel, QScrollArea, QGridLayout
+    QStatusBar, QTabBar, QPushButton, QComboBox, QLabel, QScrollArea
 )
 from PyQt5.QtGui import QIcon, QFont, QPixmap
 from PyQt5.QtCore import Qt, QSize
 from ppadb.client import Client as AdbClient
 import qdarkstyle
-
 class FixedWidthTabBar(QTabBar):
     def tabSizeHint(self, index):
         return QSize(200, self.sizeHint().height())
 
-class VSCodeStyleApp(QMainWindow):
+class DroidForen(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mobile Forensic Triage Tool")
@@ -25,6 +24,20 @@ class VSCodeStyleApp(QMainWindow):
 
         self.device = None
         self.devices_map = {}
+
+        #ExtensionMapping
+        self.ext_map = {
+            "Photos": {".jpg",".jpeg",".png"},
+            "Documents": { ".pdf",".doc",".docx",".txt",".xls",".xlsx",".ppt",".pptx"},
+            "Videos": { ".mp4",".avi",".mov",".mkv",".flv",".wmv"},
+            "Audio": { ".mp3",".wav",".aac",".flac",".ogg",".m4a"},
+            "Archives": {
+                ".zip",".rar",".7z",".tar",".gz",".bz2",".xz",
+                ".lzh",".lha",".ace",".alz",".cab",".arj",".cfs",".dmg",
+                ".xar",".zst",".wim",".iso",".shar",".uue",".b1",".kgb",".afa"}
+        }
+        #Section List
+        self.SectionList=["Call Logs", "SMS", "WhatsApp", "Photos", "Videos", "Audio", "Documents", "Contacts","Archives"]
 
         self.temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "TempData")
         os.makedirs(self.temp_dir, exist_ok=True)
@@ -52,6 +65,7 @@ class VSCodeStyleApp(QMainWindow):
         self.previewTabs = QTabWidget()
         self.previewTabs.setTabsClosable(True)
         self.previewTabs.tabCloseRequested.connect(self.previewTabs.removeTab)
+        self.previewTabs.setMovable(True)
         self.previewTabs.setTabBar(FixedWidthTabBar())
         content_layout.addWidget(self.previewTabs)
 
@@ -59,18 +73,18 @@ class VSCodeStyleApp(QMainWindow):
         self.toolbar.setMovable(False)
         self.addToolBar(Qt.TopToolBarArea, self.toolbar)
 
-        open_action = QAction("Open File", self)
-        open_action.triggered.connect(self.open_file)
-        export_action = QAction("Export", self)
-        export_action.triggered.connect(self.export_data)
-        settings_action = QAction("Settings", self)
-        disconnect_action = QAction("Disconnect", self)
-        disconnect_action.triggered.connect(self.disconnect_device)
+        open_act = QAction("Open File", self)
+        open_act.triggered.connect(self.open_file)
+        export_act = QAction("Export", self)
+        export_act.triggered.connect(self.export_data)
+        settings_act = QAction("Settings", self)
+        disconnect_act = QAction("Disconnect", self)
+        disconnect_act.triggered.connect(self.disconnect_device)
 
-        self.toolbar.addAction(open_action)
-        self.toolbar.addAction(export_action)
-        self.toolbar.addAction(settings_action)
-        self.toolbar.addAction(disconnect_action)
+        self.toolbar.addAction(open_act)
+        self.toolbar.addAction(export_act)
+        self.toolbar.addAction(settings_act)
+        self.toolbar.addAction(disconnect_act)
 
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
@@ -82,9 +96,12 @@ class VSCodeStyleApp(QMainWindow):
         self.statusBar.setVisible(False)
 
         self.setCentralWidget(central_widget)
-        self.populate_device_list()
+        self.populate_list()
 
-    def populate_device_list(self):
+    def closeEvent(self, event):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+        event.accept()
+    def populate_list(self):
         try:
             client = AdbClient(host="127.0.0.1", port=5037)
             devices = client.devices()
@@ -118,7 +135,7 @@ class VSCodeStyleApp(QMainWindow):
 
             if deviceselect not in live_devices:
                 self.statusBar.showMessage("Selected device is no longer connected.")
-                self.populate_device_list()
+                self.populate_list()
                 return
 
             self.device = live_devices[deviceselect]
@@ -140,7 +157,7 @@ class VSCodeStyleApp(QMainWindow):
                 device_root.addChild(child)
             self.sidebarTree.addTopLevelItem(device_root)
 
-            for section in ["Call Logs", "SMS", "WhatsApp", "Photos", "Videos", "Contacts"]:
+            for section in self.SectionList:
                 item = QTreeWidgetItem([section])
                 self.sidebarTree.addTopLevelItem(item)
 
@@ -166,8 +183,53 @@ class VSCodeStyleApp(QMainWindow):
         self.connect_button.setVisible(True)
         self.device_dropdown.setVisible(True)
         self.statusBar.showMessage("Disconnected")
-        self.populate_device_list()
+        self.populate_list()
+    def Extract(self,title):
+            try:
+                temp_sub_dir=os.path.join(self.temp_dir, title)
+                os.makedirs(temp_sub_dir, exist_ok=True)
+                for f in glob.glob(os.path.join(temp_sub_dir, "*")):
+                    try:
+                        os.remove(f)
+                    except:
+                        pass
+                raw=self.device.shell("ls -R /sdcard")
+                lines=raw.splitlines()
+                current_dir="/sdcard"
+                file_paths=[]
+                for line in lines:
+                    line=line.strip()
+                    if not line:
+                        continue
+                    if line.endswith(":"):
+                        current_dir=line[:-1].strip()
+                        if not current_dir.startswith("/"):
+                            current_dir=f"/{current_dir}"
+                        continue
+                    for part in line.split():
+                        if any(part.lower().endswith(ext) for ext in self.ext_map[title]):
+                            file_paths.append(f"{current_dir}/{part}")
 
+                download_files=list()
+                for path in file_paths:
+                    filename=os.path.basename(path)
+                    dest=os.path.join(temp_sub_dir, filename)
+                    try:
+                        self.device.pull(path, dest)
+                        download_files.append(dest)
+                    except:
+                        pass
+                for i in range(self.sidebarTree.topLevelItemCount()):
+                    item=self.sidebarTree.topLevelItem(i)
+                    if item.text(0) == title:
+                        item.takeChildren()
+                        for file_path in download_files:
+                            child=QTreeWidgetItem([os.path.basename(file_path)])
+                            item.addChild(child)
+                        item.setExpanded(True)
+                        break
+            except Exception as e:
+                self.open_tab(title, f"Error loading {title}: {e}")
     def open_or_focus_tab(self, item):
         title = item.text(0)
         parent = item.parent()
@@ -182,78 +244,19 @@ class VSCodeStyleApp(QMainWindow):
             if self.previewTabs.tabText(i) == title:
                 self.previewTabs.setCurrentIndex(i)
                 return
-
-        if title == "Photos":
-            try:
-                photo_dir = os.path.join(self.temp_dir, "Photos")
-                os.makedirs(photo_dir, exist_ok=True)
-                for f in glob.glob(os.path.join(photo_dir, "*")):
-                    try:
-                        os.remove(f)
-                    except:
-                        pass
-
-                raw = self.device.shell("ls -R /sdcard")
-                lines = raw.splitlines()
-                current_dir = "/sdcard"
-                file_paths = []
-
-                for line in lines:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if line.endswith(":"):
-                        current_dir = line[:-1].strip()
-                        if not current_dir.startswith("/"):
-                            current_dir = f"/{current_dir}"
-                        continue
-                    for part in line.split():
-                        if any(part.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png"]):
-                            file_paths.append(f"{current_dir}/{part}")
-
-                downloaded_files = []
-                for path in file_paths:
-                    filename = os.path.basename(path)
-                    dest = os.path.join(photo_dir, filename)
-                    try:
-                        self.device.pull(path, dest)
-                        downloaded_files.append(dest)
-                    except:
-                        pass
-
-                for i in range(self.sidebarTree.topLevelItemCount()):
-                    item = self.sidebarTree.topLevelItem(i)
-                    if item.text(0) == "Photos":
-                        item.takeChildren()
-                        for img_path in downloaded_files:
-                            child = QTreeWidgetItem([os.path.basename(img_path)])
-                            item.addChild(child)
-                        item.setExpanded(True)
-                        break
-
-            except Exception as e:
-                self.open_tab(title, f"Error loading photos: {e}")
-
-        elif title == "Call Logs":
+        if title == "Call Logs":
             content = self.device.shell("content query --uri content://call_log/calls")
             self.open_tab(title, content)
-
         elif title == "SMS":
             content = self.device.shell("content query --uri content://sms/")
             self.open_tab(title, content)
-
         elif title == "Contacts":
             content = self.device.shell("content query --uri content://contacts/phones/")
             self.open_tab(title, content)
-
         elif title == "WhatsApp":
             self.open_tab(title, "Preview not available. Use 'Export' to pull /sdcard/WhatsApp/Media/.")
-
-        elif title == "Videos":
-            self.open_tab(title, "Preview not available. Use 'Export' to pull /sdcard/DCIM/Camera/.")
-
         else:
-            self.open_tab(title, f"Preview content for: {title}")
+            self.Extract(title)
 
     def open_image_preview(self, title, img_path):
         for i in range(self.previewTabs.count()):
@@ -262,11 +265,17 @@ class VSCodeStyleApp(QMainWindow):
                 return
 
         label = QLabel()
-        pixmap = QPixmap(img_path).scaled(800, 600, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        label.setPixmap(pixmap)
+        label.setAlignment(Qt.AlignCenter)
+
+        pixmap = QPixmap(img_path)
+        label.setPixmap(pixmap.scaled(800, 600, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.addWidget(label, alignment=Qt.AlignCenter)
 
         scroll = QScrollArea()
-        scroll.setWidget(label)
+        scroll.setWidget(container)
         scroll.setWidgetResizable(True)
 
         index = self.previewTabs.addTab(scroll, title)
@@ -328,6 +337,6 @@ class VSCodeStyleApp(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
-    window = VSCodeStyleApp()
+    window = DroidForen()
     window.show()
     sys.exit(app.exec_())
