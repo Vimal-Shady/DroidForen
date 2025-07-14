@@ -3,6 +3,8 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+#TempData Directory
+TempData/
 # C extensions
 *.so
 
