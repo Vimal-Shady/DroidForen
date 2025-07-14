@@ -25,9 +25,8 @@ class DroidForen(QMainWindow):
         self.setWindowTitle("Mobile Forensic Triage Tool")
         self.setGeometry(200, 100, 1100, 650)
         self.setFont(QFont("Segoe UI", 10))
-
         self.device = None
-        self.devices_map = {}
+        self.devices_map={}
 
         #ExtensionMapping
         self.ext_map = {
@@ -106,6 +105,8 @@ class DroidForen(QMainWindow):
     #     shutil.rmtree(self.temp_dir, ignore_errors=True)
     #     event.accept()
 
+    #Initial Single Threaded
+    
     def populate_list(self):
         try:
             client = AdbClient(host="127.0.0.1", port=5037)
@@ -133,7 +134,6 @@ class DroidForen(QMainWindow):
         if not deviceselect:
             self.statusBar.showMessage("Please select a device first.")
             return
-
         try:
             client = AdbClient(host="127.0.0.1", port=5037)
             live_devices = {d.serial: d for d in client.devices()}
@@ -161,11 +161,7 @@ class DroidForen(QMainWindow):
                 child = QTreeWidgetItem([f"{key}: {value}"])
                 device_root.addChild(child)
             self.sidebarTree.addTopLevelItem(device_root)
-
-            for section in self.SectionList:
-                item = QTreeWidgetItem([section])
-                self.sidebarTree.addTopLevelItem(item)
-
+            self.sidebarTree.addTopLevelItems(QTreeWidgetItem([section]) for section in self.SectionList)
             self.sidebarTree.setVisible(True)
             self.previewTabs.setVisible(True)
             self.toolbar.setVisible(True)
@@ -313,7 +309,7 @@ class DroidForen(QMainWindow):
             table.setRowCount(len(entries))
 
             for row_idx, entry in enumerate(entries):
-                entry_dict = dict()
+                entry_dict = {}
                 for part in entry.split(","):
                     if "=" in part:
                         key, val = part.strip().split("=", 1)
@@ -324,7 +320,7 @@ class DroidForen(QMainWindow):
 
                 name = entry_dict.get("name", "N/A")
                 number = entry_dict.get("number", "N/A")
-                call_type = self.get_call_type(entry_dict.get("type", "0"))
+                call_type = self.call_type(entry_dict.get("type", "0"))
                 date = self.format_date(entry_dict.get("date", "0"))
                 duration = f"{entry_dict.get('duration', '0')} sec"
 
@@ -350,7 +346,7 @@ class DroidForen(QMainWindow):
         editor.setReadOnly(True)
         index = self.previewTabs.addTab(editor, title)
         self.previewTabs.setCurrentIndex(index)
-    def get_call_type(self, call_type):
+    def call_type(self, call_type):
         mapping = {
             "1": "Incoming",
             "2": "Outgoing",
@@ -387,7 +383,7 @@ class DroidForen(QMainWindow):
                 return {"EXIF": "No EXIF data found."}
 
             exif_data = piexif.load(exif_bytes)
-            exif_dict = dict()
+            exif_dict = {}
             exif_dict["Make"] = exif_data["0th"].get(piexif.ImageIFD.Make, b"").decode(errors="ignore")
             exif_dict["Model"] = exif_data["0th"].get(piexif.ImageIFD.Model, b"").decode(errors="ignore")
             exif_dict["Software"] = exif_data["0th"].get(piexif.ImageIFD.Software, b"").decode(errors="ignore")
@@ -438,7 +434,9 @@ class DroidForen(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
+    with open(r"DroidDark.qss", "r") as f:
+        app.setStyleSheet(f.read())
+    # app.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
     window = DroidForen()
     window.show()
     sys.exit(app.exec_())
