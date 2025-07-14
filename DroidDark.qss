@@ -38,6 +38,10 @@ QTreeWidget, QTreeView {
     color:#ccc;
     border:1px solid #222;
 }
+QTreeWidget::item, QTreeView::item {
+    min-height:30px;
+    font-size:14px;
+}
 QTreeWidget::item::hover {
     border-style:solid;
     border-top-color:qlineargradient(spread:pad, x1:0, y1:1, x2:1, y2:1, stop:0 #d33af1, stop:0.4 #d33af1, stop:0.5 #100E19, stop:1 #100E19);
