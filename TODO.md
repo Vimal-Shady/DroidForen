@@ -1,5 +1,5 @@
 #Features To be Added:
-1. Adding Chatbot interface (web gui load or slider sidebar)
+1. Adding Chatbot interface (web gui load or slider sidebar) ✅
 2. Update the menu bar (add api config menu,add settings)
 3. Update Theme
 4. Resource Load and Agentic view
