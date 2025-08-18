@@ -3,31 +3,23 @@ import os
 import shutil
 import glob
 import re
-import json
 from datetime import datetime
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTreeWidget, QTreeWidgetItem, QTabWidget,
     QTextEdit, QToolBar, QAction, QFileDialog, QWidget, QHBoxLayout, QVBoxLayout,
     QTableWidgetItem, QStatusBar, QTabBar, QPushButton, QComboBox, QLabel,
-    QScrollArea, QSplitter, QTableWidget, QLineEdit, QTableView, QRadioButton,
-    QButtonGroup, QGroupBox, QMessageBox, QListWidget, QListWidgetItem
+    QScrollArea, QSplitter, QTableWidget, QLineEdit, QTableView
 )
 import piexif
 from PIL import Image
 from PyQt5.QtGui import QFont, QPixmap, QStandardItemModel, QStandardItem
 from PyQt5.QtCore import Qt, QSize, QSortFilterProxyModel, QPropertyAnimation, QRect, QEasingCurve
-
 from ppadb.client import Client as AdbClient
 import qdarkstyle
-from langchain_openai import ChatOpenAI
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # ---------------------------- Usage Stats helpers ----------------------------
 USAGE_EVENT_RE = re.compile(r'time="([^"]+)"\s+type=([A-Z_]+)\s+package=([\w\.\d]+)(.*)')
-
 
 class UsageStatsWidget(QWidget):
     """Embedded widget for the 'Usage Stats' tab. Auto-pulls via ADB and shows a filterable table.
@@ -65,7 +57,6 @@ class UsageStatsWidget(QWidget):
         layout.addLayout(top)
         layout.addWidget(self.table)
 
-        # initial load
         self.refresh_usage_stats()
 
     def refresh_usage_stats(self):
@@ -107,8 +98,7 @@ class UsageStatsWidget(QWidget):
 class ChatSidebar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.main_app = parent  
-        self.setFixedWidth(0)  # hidden initially; width is managed by main window
+        self.setFixedWidth(0)  # hidden
         self.setStyleSheet(
             """
             QWidget { background: #f6f7fb; }
@@ -117,34 +107,11 @@ class ChatSidebar(QWidget):
             QPushButton { padding: 6px 10px; }
             """
         )
-        self.root = QVBoxLayout(self)
-        self.root.setContentsMargins(10, 10, 10, 10)
-        self.root.setSpacing(8)
 
-        # Create both UIs and toggle between them
-        self._build_not_configured_card()
-        self._build_chat_ui()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(8)
 
-        # default to not configured until main app updates
-        self.show_not_configured()
-
-    def _build_not_configured_card(self):
-        self.not_configured_widget = QWidget()
-        v = QVBoxLayout(self.not_configured_widget)
-        v.setSpacing(8)
-        v.addWidget(QLabel("<b>Agent not configured</b>"))
-        msg = QLabel("The AI agent is not configured. Please configure it in Settings.")
-        msg.setWordWrap(True)
-        v.addWidget(msg)
-        btn = QPushButton("Open Settings")
-        btn.clicked.connect(self._open_settings_request)
-        v.addWidget(btn)
-        v.addStretch(1)
-
-    def _build_chat_ui(self):
-        self.chat_widget = QWidget()
-        v = QVBoxLayout(self.chat_widget)
-        v.setContentsMargins(0, 0, 0, 0)
         title = QLabel("Chat")
         title.setStyleSheet("font-weight: 600;")
         self.chat_history = QTextEdit()
@@ -159,39 +126,22 @@ class ChatSidebar(QWidget):
         row.addWidget(self.input_line, 1)
         row.addWidget(self.send_btn)
 
-        v.addWidget(title)
-        v.addWidget(self.chat_history, 1)
-        v.addLayout(row)
-
-    def _open_settings_request(self):
-        if self.main_app:
-            self.main_app.show_settings_page()
+        root.addWidget(title)
+        root.addWidget(self.chat_history, 1)
+        root.addLayout(row)
 
     def echo_message(self):
         text = self.input_line.text().strip()
         if not text:
             return
         self.chat_history.append(f"<b>You:</b> {text}")
+        # Placeholder bot echo response
         self.chat_history.append(f"<b>AI:</b> :) Received: {text}")
         self.input_line.clear()
 
-    def show_not_configured(self):
-        self._set_content_widget(self.not_configured_widget)
 
-    def show_chat_ui(self):
-        self._set_content_widget(self.chat_widget)
+# ---------------------------- Main app ----------------------------
 
-    def _set_content_widget(self, widget):
-        while self.root.count():
-            item = self.root.takeAt(0)
-            w = item.widget()
-            if w:
-                w.setParent(None)
-        # Add requested widget
-        self.root.addWidget(widget)
-
-
-# ---------------------------- Main app helpers ----------------------------
 def parse_usage_events(file_path):
     events = []
     try:
@@ -230,212 +180,11 @@ class ParameterFilterProxyModel(QSortFilterProxyModel):
                     return False
         return True
 
-
 class FixedWidthTabBar(QTabBar):
     def tabSizeHint(self, index):
         return QSize(200, self.sizeHint().height())
 
 
-# ---------------------------- Settings Page (main content) ----------------------------
-class SettingsPage(QWidget):
-    """
-    Settings page shown in the central content area (replaces previewTabs).
-    - Theme selector (from QSS/ folder)
-    - API configuration (Online / Local)
-    - Save / Back
-    """
-    def __init__(self, main_app):
-        super().__init__()
-        self.main_app = main_app
-        self.project_root = main_app.project_root
-        self.config_path = main_app.config_path
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(12, 12, 12, 12)
-
-        # Theme selector
-        theme_box = QGroupBox("Theme")
-        tlay = QHBoxLayout()
-        self.theme_dropdown = QComboBox()
-        self._refresh_theme_list()
-        self.apply_theme_btn = QPushButton("Apply Theme")
-        self.apply_theme_btn.clicked.connect(self.apply_theme_clicked)
-        tlay.addWidget(self.theme_dropdown, 1)
-        tlay.addWidget(self.apply_theme_btn)
-        theme_box.setLayout(tlay)
-        layout.addWidget(theme_box)
-
-        # API config
-        api_box = QGroupBox("AI Agent Configuration")
-        apil = QVBoxLayout()
-
-        # mode radio
-        mode_row = QHBoxLayout()
-        self.online_radio = QRadioButton("Online (OpenAI API Key)")
-        self.local_radio = QRadioButton("Local (LM Studio)")
-        self.mode_group = QButtonGroup(self)
-        self.mode_group.addButton(self.online_radio)
-        self.mode_group.addButton(self.local_radio)
-        mode_row.addWidget(self.online_radio)
-        mode_row.addWidget(self.local_radio)
-        apil.addLayout(mode_row)
-
-        # online fields
-        self.online_key_input = QLineEdit()
-        self.online_key_input.setPlaceholderText("Enter OpenAI API key (sk-...)")
-        apil.addWidget(self.online_key_input)
-
-        # local fields
-        local_group = QWidget()
-        local_layout = QVBoxLayout(local_group)
-        self.local_url_input = QLineEdit()
-        self.local_url_input.setPlaceholderText("LM Studio base URL (e.g. http://127.0.0.1:8080)")
-        self.local_model_input = QLineEdit()
-        self.local_model_input.setPlaceholderText("Model name (e.g. ggml-model.bin)")
-        local_layout.addWidget(self.local_url_input)
-        local_layout.addWidget(self.local_model_input)
-        apil.addWidget(local_group)
-
-        # status label
-        self.status_label = QLabel("")
-        apil.addWidget(self.status_label)
-
-        api_box.setLayout(apil)
-        layout.addWidget(api_box)
-
-        # Save / Back buttons
-        btn_row = QHBoxLayout()
-        self.save_btn = QPushButton("Save & Test Connection")
-        self.save_btn.clicked.connect(self.save_and_test)
-        self.back_btn = QPushButton("Back")
-        self.back_btn.clicked.connect(self.on_back)
-        btn_row.addStretch(1)
-        btn_row.addWidget(self.save_btn)
-        btn_row.addWidget(self.back_btn)
-        layout.addLayout(btn_row)
-
-        # Populate with current config if present
-        self.load_config_to_ui()
-
-        # Wire radio toggles to show/hide appropriate fields
-        self.online_radio.toggled.connect(self._update_field_visibility)
-        self._update_field_visibility()
-
-    def _refresh_theme_list(self):
-        qss_dir = os.path.join(self.project_root, "QSS")
-        files = []
-        if os.path.isdir(qss_dir):
-            for f in sorted(os.listdir(qss_dir)):
-                if f.lower().endswith(".qss"):
-                    files.append(f)
-        self.theme_dropdown.clear()
-        self.theme_dropdown.addItem("Default (None)")
-        for f in files:
-            self.theme_dropdown.addItem(f)
-
-    def apply_theme_clicked(self):
-        sel = self.theme_dropdown.currentText()
-        if sel == "Default (None)":
-            QApplication.instance().setStyleSheet("")  # clear stylesheet
-            self.main_app.current_theme = None
-            self.main_app.statusBar.showMessage("Theme cleared")
-            return
-        qss_path = os.path.join(self.project_root, "QSS", sel)
-        if os.path.exists(qss_path):
-            try:
-                with open(qss_path, "r", encoding="utf-8") as fh:
-                    qss = fh.read()
-                QApplication.instance().setStyleSheet(qss)
-                self.main_app.current_theme = sel
-                self.main_app.statusBar.showMessage(f"Applied theme: {sel}")
-            except Exception as e:
-                QMessageBox.warning(self, "Theme Error", f"Failed to apply theme: {e}")
-        else:
-            QMessageBox.warning(self, "Theme Error", "Selected theme file not found.")
-
-    def _update_field_visibility(self):
-        online = self.online_radio.isChecked()
-        # online key visible if online, local inputs visible if local
-        self.online_key_input.setVisible(online)
-        self.local_url_input.setVisible(not online)
-        self.local_model_input.setVisible(not online)
-
-    def load_config_to_ui(self):
-        # Load config if it exists and populate fields
-        cfg = {}
-        try:
-            if os.path.exists(self.config_path):
-                with open(self.config_path, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-        except Exception:
-            cfg = {}
-        mode = cfg.get("api_mode", "online")
-        if mode == "local":
-            self.local_radio.setChecked(True)
-        else:
-            self.online_radio.setChecked(True)
-
-        self.online_key_input.setText(cfg.get("openai_key", ""))
-        self.local_url_input.setText(cfg.get("host_url", ""))
-        self.local_model_input.setText(cfg.get("model", ""))
-
-        theme = cfg.get("theme")
-        if theme:
-            # refresh list and set current index
-            self._refresh_theme_list()
-            idx = self.theme_dropdown.findText(theme)
-            if idx >= 0:
-                self.theme_dropdown.setCurrentIndex(idx)
-
-        self._update_field_visibility()
-
-    def save_and_test(self):
-        # Gather config
-        api_mode = "local" if self.local_radio.isChecked() else "online"
-        cfg = {
-            "api_mode": api_mode,
-            "openai_key": self.online_key_input.text().strip(),
-            "host_url": self.local_url_input.text().strip(),
-            "model": self.local_model_input.text().strip(),
-            "theme": self.theme_dropdown.currentText() if self.theme_dropdown.currentText() != "Default (None)" else None
-        }
-        # Save to file
-        try:
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, indent=2)
-        except Exception as e:
-            QMessageBox.warning(self, "Save Error", f"Failed to save config: {e}")
-            return
-
-        # Apply theme immediately if chosen
-        if cfg.get("theme"):
-            qss_path = os.path.join(self.project_root, "QSS", cfg["theme"])
-            if os.path.exists(qss_path):
-                try:
-                    with open(qss_path, "r", encoding="utf-8") as fh:
-                        QApplication.instance().setStyleSheet(fh.read())
-                except Exception:
-                    pass
-
-        # Try a connection test (instantiation of ChatOpenAI)
-        ok, message = self.main_app.test_connection(cfg)
-        if ok:
-            # success: green label, update status bar, auto-refresh chat sidebar
-            self.status_label.setText(f"<font color='green'>{message}</font>")
-            self.main_app.statusBar.showMessage(message)
-            self.main_app.on_config_updated(True, cfg)
-        else:
-            self.status_label.setText(f"<font color='red'>{message}</font>")
-            self.main_app.statusBar.showMessage("API Connection Failed")
-            self.main_app.on_config_updated(False, cfg)
-
-    def on_back(self):
-        # navigate back to main preview UI
-        self.main_app.hide_settings_page()
-
-
-# ---------------------------- Main application ----------------------------
 class DroidForen(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -463,55 +212,37 @@ class DroidForen(QMainWindow):
             "Audio", "Documents", "Contacts", "Archives", "Usage Stats"
         ]
 
-        # file paths & project dirs
         self.project_root = os.path.dirname(os.path.abspath(__file__))
         self.temp_dir = os.path.join(self.project_root, "TempData")
         os.makedirs(self.temp_dir, exist_ok=True)
 
-        # config path
-        self.config_path = os.path.join(self.project_root, "config.json")
-        self.current_theme = None
+        central_widget = QWidget()
+        main_layout = QVBoxLayout(central_widget)
+        content_layout = QHBoxLayout()
+        main_layout.addLayout(content_layout)
 
-        # central content area container
-        self.central_container = QWidget()
-        self.setCentralWidget(self.central_container)
-        self.main_layout = QVBoxLayout(self.central_container)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_layout = QHBoxLayout()
-        self.main_layout.addLayout(self.content_layout)
-
-        # Top controls (device dropdown + connect)
         self.device_dropdown = QComboBox()
         self.device_dropdown.setPlaceholderText("Select a device")
-        self.main_layout.addWidget(self.device_dropdown, alignment=Qt.AlignCenter)
+        main_layout.addWidget(self.device_dropdown, alignment=Qt.AlignCenter)
         self.device_dropdown.setVisible(False)
 
         self.connect_button = QPushButton("Connect")
         self.connect_button.clicked.connect(self.connect_device)
-        self.main_layout.addWidget(self.connect_button, alignment=Qt.AlignCenter)
+        main_layout.addWidget(self.connect_button, alignment=Qt.AlignCenter)
 
-        # Left tree (sidebar)
         self.sidebarTree = QTreeWidget()
         self.sidebarTree.setHeaderHidden(True)
         self.sidebarTree.setMaximumWidth(220)
         self.sidebarTree.itemClicked.connect(self.open_or_focus_tab)
-        self.content_layout.addWidget(self.sidebarTree)
+        content_layout.addWidget(self.sidebarTree)
 
-        # Main preview tabs (center)
         self.previewTabs = QTabWidget()
         self.previewTabs.setTabsClosable(True)
         self.previewTabs.tabCloseRequested.connect(self.previewTabs.removeTab)
         self.previewTabs.setMovable(True)
         self.previewTabs.setTabBar(FixedWidthTabBar())
-        self.content_layout.addWidget(self.previewTabs, 1)
+        content_layout.addWidget(self.previewTabs)
 
-        # Settings page widget (hidden by default). It will replace previewTabs when shown.
-        self.settings_page = SettingsPage(self)
-        self.settings_page.setVisible(False)
-        # We'll add settings_page to the layout but keep it hidden; toggling visibility will display it
-        self.content_layout.addWidget(self.settings_page, 1)
-
-        # Toolbar
         self.toolbar = QToolBar("Main Toolbar")
         self.toolbar.setMovable(False)
         self.addToolBar(Qt.TopToolBarArea, self.toolbar)
@@ -520,9 +251,7 @@ class DroidForen(QMainWindow):
         open_act.triggered.connect(self.open_file)
         export_act = QAction("Export", self)
         export_act.triggered.connect(self.export_data)
-        # Settings action should show the settings page in-app (not a dialog)
         settings_act = QAction("Settings", self)
-        settings_act.triggered.connect(self.show_settings_page)
         disconnect_act = QAction("Disconnect", self)
         disconnect_act.triggered.connect(self.disconnect_device)
 
@@ -531,24 +260,23 @@ class DroidForen(QMainWindow):
         self.toolbar.addAction(settings_act)
         self.toolbar.addAction(disconnect_act)
 
-        # Status bar
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("Not Connected")
 
-        # start hidden UI (until device connected)
         self.sidebarTree.setVisible(False)
         self.previewTabs.setVisible(False)
         self.toolbar.setVisible(False)
         self.statusBar.setVisible(False)
 
+        self.setCentralWidget(central_widget)
         self.populate_list()
 
-        # Chat sidebar (right)
+        # ---------- Right fixed sliding chat sidebar ----------
         self.chatSidebar = ChatSidebar(self)
-        self.chat_width = 320
+        self.chat_width = 320  # expanded width
         self.chatSidebar.setFixedHeight(self.height())
-        self.chatSidebar.move(self.width(), 0)
+        self.chatSidebar.move(self.width(), 0)  # start hidden (outside)
 
         self.chatToggleBtn = QPushButton("<", self)
         self.chatToggleBtn.setFixedWidth(28)
@@ -561,12 +289,12 @@ class DroidForen(QMainWindow):
         self.chatAnim.setDuration(250)
         self.chatAnim.setEasingCurve(QEasingCurve.InOutCubic)
 
-        # Load config at startup and test
-        self.loaded_config = {}
-        self.load_config_and_test_on_startup()
+    # def closeEvent(self, event):
+    #     shutil.rmtree(self.temp_dir, ignore_errors=True)
+    #     event.accept()
 
-    # ----------------- UI layout helpers -----------------
     def position_chat_controls(self):
+        # place toggle button at right edge, vertically centered
         self.chatToggleBtn.move(self.width() - self.chatToggleBtn.width(), int((self.height() - self.chatToggleBtn.height()) / 2))
         if not self._chat_open:
             self.chatSidebar.move(self.width(), 0)
@@ -579,6 +307,9 @@ class DroidForen(QMainWindow):
         self.position_chat_controls()
 
     def toggle_chat_sidebar(self):
+        """Slide the chat sidebar in/out and update the toggle button.
+        Fixes AttributeError by using self.chatSidebar and self.chatToggleBtn.
+        """
         self.chatSidebar.setFixedWidth(self.chat_width)
         self.chatAnim.stop()
         if self._chat_open:
@@ -590,6 +321,7 @@ class DroidForen(QMainWindow):
             self._chat_open = False
             self.chatToggleBtn.setText("<")
         else:
+            # show -> animate into view from the right
             start = QRect(self.width(), 0, self.chat_width, self.height())
             end = QRect(self.width() - self.chat_width, 0, self.chat_width, self.height())
             self.chatAnim.setStartValue(start)
@@ -598,7 +330,7 @@ class DroidForen(QMainWindow):
             self._chat_open = True
             self.chatToggleBtn.setText(">")
 
-    # ----------------- ADB/device logic -----------------
+    # ---------------- ADB/device logic ----------------
     def populate_list(self):
         try:
             client = AdbClient(host="127.0.0.1", port=5037)
@@ -657,7 +389,6 @@ class DroidForen(QMainWindow):
             self.sidebarTree.setVisible(True)
             self.previewTabs.setVisible(True)
             self.toolbar.setVisible(True)
-            self.statusBar.setVisible(True)
             self.connect_button.setVisible(False)
             self.device_dropdown.setVisible(False)
 
@@ -903,9 +634,7 @@ class DroidForen(QMainWindow):
             return {"Error": str(e)}
 
     def export_data(self):
-        current_tab = None
-        if self.previewTabs.count() > 0 and self.previewTabs.currentIndex() >= 0:
-            current_tab = self.previewTabs.tabText(self.previewTabs.currentIndex())
+        current_tab = self.previewTabs.tabText(self.previewTabs.currentIndex())
         folder = QFileDialog.getExistingDirectory(self, "Select export folder")
         if not folder:
             return
@@ -942,119 +671,15 @@ class DroidForen(QMainWindow):
         except Exception as e:
             self.statusBar.showMessage(f"Export failed: {str(e)}")
 
-    # ----------------- Settings page & config integration -----------------
-    def show_settings_page(self):
-        # hide preview tabs and show settings page (replace center area)
-        self.previewTabs.setVisible(False)
-        self.settings_page.setVisible(True)
-        # ensure left tree remains visible
-        self.sidebarTree.setVisible(True)
-
-    def hide_settings_page(self):
-        # show back the normal preview UI
-        self.settings_page.setVisible(False)
-        self.previewTabs.setVisible(True)
-
-    def load_config_and_test_on_startup(self):
-        cfg = {}
-        try:
-            if os.path.exists(self.config_path):
-                with open(self.config_path, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-        except Exception:
-            cfg = {}
-
-        self.loaded_config = cfg
-        if cfg:
-            ok, message = self.test_connection(cfg)
-            if ok:
-                self.statusBar.setVisible(True)
-                self.statusBar.showMessage(message)
-                self.chatSidebar.show_chat_ui()
-                theme = cfg.get("theme")
-                if theme:
-                    qss_path = os.path.join(self.project_root, "QSS", theme)
-                    if os.path.exists(qss_path):
-                        try:
-                            with open(qss_path, "r", encoding="utf-8") as fh:
-                                QApplication.instance().setStyleSheet(fh.read())
-                        except Exception:
-                            pass
-                self.current_theme = theme
-                return
-        # if we get here, not connected / no config
-        self.chatSidebar.show_not_configured()
-        self.statusBar.setVisible(True)
-        if not cfg:
-            self.statusBar.showMessage("Agent not configured")
-        else:
-            self.statusBar.showMessage("Agent connection failed")
-
-    def test_connection(self, cfg):
-        """
-        Try to instantiate ChatOpenAI with the provided config.
-        Returns (ok: bool, message: str)
-        """
-        if ChatOpenAI is None:
-            return False, "ChatOpenAI import not available (install appropriate langchain package)"
-
-        try:
-            mode = cfg.get("api_mode", "online")
-            model = cfg.get("model") or "gpt-4o-mini"
-            if mode == "local":
-                url = cfg.get("host_url", "").strip()
-                if not url:
-                    return False, "Local URL is empty"
-                # instantiate ChatOpenAI with base_url
-                # NOTE: depending on your langchain version the parameter names may differ.
-                ChatOpenAI(api_key=cfg.get("openai_key", "") or os.getenv("API_KEY"), base_url=url, model=model)
-                return True, f"Connected to {url}"
-            else:
-                key = cfg.get("openai_key", "").strip()
-                if not key:
-                    return False, "OpenAI API key is empty"
-                ChatOpenAI(api_key=key, model=model)
-                return True, "API Connected"
-        except Exception as e:
-            # return the error message for diagnostics
-            return False, f"Connection failed: {e}"
-
-    def on_config_updated(self, success, cfg):
-        """
-        Called by SettingsPage after save & test.
-        If success == True -> update chat UI, statusbar, and remember config.
-        """
-        self.loaded_config = cfg
-        if success:
-            theme = cfg.get("theme")
-            if theme:
-                qss_path = os.path.join(self.project_root, "QSS", theme)
-                if os.path.exists(qss_path):
-                    try:
-                        with open(qss_path, "r", encoding="utf-8") as fh:
-                            QApplication.instance().setStyleSheet(fh.read())
-                    except Exception:
-                        pass
-                self.current_theme = theme
-            # update status bar and chat sidebar
-            if cfg.get("api_mode") == "local":
-                url = cfg.get("host_url", "")
-                self.statusBar.showMessage(f"Connected to {url}")
-            else:
-                self.statusBar.showMessage("API Connected")
-            self.chatSidebar.show_chat_ui()
-        else:
-            self.chatSidebar.show_not_configured()
-
-    # ----------------- Application entry helpers -----------------
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    # QSS Disabled for testing by default. The settings page can apply them.
-    # app.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
+    #QSS Disabled for testing
 
+    # with open(r"QSS\DroidForen.qss", "r") as f:
+    #     app.setStyleSheet(f.read())
+    # app.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
     window = DroidForen()
     window.show()
     sys.exit(app.exec_())
