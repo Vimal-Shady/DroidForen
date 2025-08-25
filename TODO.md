@@ -1,8 +1,8 @@
 #Features To be Added:
 1. Adding Chatbot interface (web gui load or slider sidebar) ✅
-2. Update the menu bar (add api config menu,add settings)
-3. Update Theme
-4. Resource Load and Agentic view
+2. Update the menu bar (add api config menu,add settings) ✅
+3. Update Theme ✅ (Used QSS folder)
+4. Resource Load and Agentic view (testing)
 5. API key support and local run support (openai arch for api and lmstudio)
 6. Manual Report Generation Feature
 7. Agentic report generation
