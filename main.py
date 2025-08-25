@@ -1529,10 +1529,7 @@ class DroidForen(QMainWindow):
             self.statusBar.showMessage("Report generation failed")
 
 
-# ============================================================
-# Entry point
-# ============================================================
-
+#main
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = DroidForen()
